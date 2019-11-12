@@ -1,0 +1,151 @@
+import numpy as np 
+import pandas as pd 
+import json
+
+import sklearn 
+
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix
+from sklearn.utils import shuffle
+
+import re
+
+import nltk
+from nltk.stem.porter import PorterStemmer
+from nltk.corpus import stopwords
+
+
+# Load Yelp business data
+
+business_df = pd.read_csv("C:/Users/davorin.peceli/Documents/ML/Kaggle/Yelp/yelp_business.csv/yelp_business.csv")
+review_df = pd.read_csv("C:/Users/davorin.peceli/Documents/ML/Kaggle/Yelp/yelp_review.csv/yelp_review.csv")
+
+
+# Preparing reviews only for restaurents 
+
+biz = business_df[business_df['categories'].str.contains('Restaurant') == True]
+biz = biz[biz['city'].str.contains('Las Vegas') == True]
+rev = review_df[review_df.business_id.isin(biz['business_id']) == True]
+
+
+# To make Sentiment Analysis binary classification problem, negative label will be star rating less than or equalto 3
+# and positive label to be star rating greater than 3  
+
+rev['sentiment'] = [1 if x > 3 else 0 for x in rev['stars']]
+rev = rev[['text', 'sentiment']]
+
+# Balancing classe by undesampling 0 class 
+sentiment_count = rev.sentiment.value_counts()
+
+
+# Class count
+count_class_0, count_class_1 = rev.sentiment.value_counts()
+
+# Divide by class
+rev_class_0 = rev[rev['sentiment'] == 0]
+rev_class_1 = rev[rev['sentiment'] == 1]
+
+rev_class_1_under = rev_class_1.sample(count_class_1)
+rev_test_under = pd.concat([rev_class_1_under, rev_class_0], axis=0)
+
+rev = shuffle(rev_test_under)
+#rev.sentiment.value_counts().plot(kind='bar', title='Count (target)');
+
+rev = rev[:20000]
+
+# Cleaning text data using regular expresion library (re)
+
+def preprocessor(text):
+    text = re.sub('<[^>]*>', '', text)
+    emoticons = re.findall('(?::|;|=)(?:-)?(?:\)|\(|D|P)',
+                           text)
+    text = (re.sub('[\W]+', ' ', text.lower()) +
+            ' '.join(emoticons).replace('-', ''))
+    return text
+
+rev['text'] = rev['text'].apply(preprocessor)
+
+
+
+# Processing document into tokens using The Natural Language Toolkit for 
+# implementation of the Porter stemming algorithm 
+
+porter = PorterStemmer()
+
+def tokenizer(text):
+    return text.split()
+
+def tokenizer_porter(text):
+    return [porter.stem(word) for word in text.split()]
+
+
+# Dowloading stop-words (extremly common words) from nltk 
+nltk.download('stopwords')
+stop = stopwords.words('english')
+
+#rev = rev[['text', 'sentiment']]
+
+# Separating training and testing documents
+X_train, X_test, y_train, y_test = train_test_split(
+    rev.text, rev.sentiment, test_size=0.33, random_state=42)
+
+
+# TF-IDF features
+
+tfidf = TfidfVectorizer(strip_accents=None,
+                        lowercase=False,
+                        preprocessor=None)
+                        
+                        
+# Optimization of the set of prameters for logistic regression model using 
+# using GridSearchCV object with 5-fold stratified cross-validation                         
+                        
+param_grid = [{'vect__ngram_range': [(1, 1)],
+               'vect__stop_words': [stop, None],
+               'vect__tokenizer': [tokenizer, tokenizer_porter],
+               'clf__penalty': ['l1', 'l2'],
+               'clf__C': [1.0, 10.0, 100.0]},
+              {'vect__ngram_range': [(1, 1)],
+               'vect__stop_words': [stop, None],
+               'vect__tokenizer': [tokenizer, tokenizer_porter],
+               'vect__use_idf':[False],
+               'vect__norm':[None],
+               'clf__penalty': ['l1', 'l2'],
+               'clf__C': [1.0, 10.0, 100.0]}
+              ]
+              
+lr_tfidf = Pipeline([('vect', tfidf),
+                     ('clf', LogisticRegression(dual=False, random_state=0))])
+
+gs_lr_tfidf = GridSearchCV(lr_tfidf, param_grid,
+                           scoring='accuracy',
+                           cv=5,
+                           verbose=1,
+                           n_jobs=-1)
+                           
+                           
+                           
+gs_lr_tfidf.fit(X_train, y_train)
+
+print('Best parameter set: %s ' % gs_lr_tfidf.best_params_)
+print('CV Accuracy: %.3f' % gs_lr_tfidf.best_score_)
+
+
+clf = gs_lr_tfidf.best_estimator_
+print('CV Accuracy: %.3f' % gs_lr_tfidf.best_score_)
+print('Test Accuracy: %.3f' % clf.score(X_test, y_test))
+
+
+#Classification report
+preds = clf.predict(X_test)
+print(classification_report(y_test, preds))
+print(confusion_matrix(y_test, preds))
+
+
