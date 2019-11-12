@@ -1,0 +1,142 @@
+import numpy as np 
+import pandas as pd 
+
+import numpy as np 
+import pandas as pd 
+
+
+import sklearn 
+
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix
+from sklearn.utils import shuffle
+
+
+import nltk
+from nltk.stem.porter import PorterStemmer
+from nltk.corpus import stopwords
+import sklearn 
+import nltk
+import random
+from nltk.classify.scikitlearn import SklearnClassifier
+import pickle
+from sklearn.naive_bayes import MultinomialNB, BernoulliNB
+from sklearn.svm import SVC, LinearSVC, NuSVC
+from nltk.classify import ClassifierI
+from statistics import mode
+from nltk.tokenize import word_tokenize
+
+import re
+
+
+# Load Yelp business data
+
+business_df = pd.read_csv("C:/Users/davorin.peceli/Documents/ML/Kaggle/Yelp/yelp_business.csv/yelp_business.csv")
+review_df = pd.read_csv("C:/Users/davorin.peceli/Documents/ML/Kaggle/Yelp/yelp_review.csv/yelp_review.csv")
+
+
+# Preparing reviews only for restaurents 
+
+biz = business_df[business_df['categories'].str.contains('Restaurant') == True]
+biz = biz[biz['city'].str.contains('Las Vegas') == True]
+rev = review_df[review_df.business_id.isin(biz['business_id']) == True]
+
+rev = rev[:30000]
+
+# To make Sentiment Analysis binary classification problem, negative label will be star rating less than or equalto 3
+# and positive label to be star rating greater than 3  
+
+rev['sentiment'] = [1 if x > 3 else 0 for x in rev['stars']]
+rev = rev[['text', 'sentiment']]
+
+
+# Balancing classe by undesampling 0 class 
+sentiment_count = rev.sentiment.value_counts()
+
+
+# Class count
+count_class_0, count_class_1 = rev.sentiment.value_counts()
+
+# Divide by class
+rev_class_0 = rev[rev['sentiment'] == 0]
+rev_class_1 = rev[rev['sentiment'] == 1]
+
+rev_class_1_under = rev_class_1.sample(count_class_1)
+rev_test_under = pd.concat([rev_class_1_under, rev_class_0], axis=0)
+
+#print('Random under-sampling:')
+#print(rev_test_under.sentiment.value_counts())
+
+#rev_test_under.sentiment.value_counts().plot(kind='bar', title='Count (target)');
+
+rev = rev_test_under
+rev.sentiment.value_counts().plot(kind='bar', title='Count (target)');
+
+rev_test_under = shuffle(rev_test_under)
+
+
+# Cleaning text data using regular expresion library (re)
+
+def preprocessor(text):
+    text = re.sub('<[^>]*>', '', text)
+    emoticons = re.findall('(?::|;|=)(?:-)?(?:\)|\(|D|P)',
+                           text)
+    text = (re.sub('[\W]+', ' ', text.lower()) +
+            ' '.join(emoticons).replace('-', ''))
+    return text
+
+rev['text'] = rev['text'].apply(preprocessor)
+
+
+
+# Processing document into tokens using The Natural Language Toolkit for 
+# implementation of the Porter stemming algorithm 
+
+porter = PorterStemmer()
+
+def tokenizer(text):
+    return text.split()
+
+def tokenizer_porter(text):
+    return [porter.stem(word) for word in text.split()]
+
+
+# Dowloading stop-words (extremly common words) from nltk 
+nltk.download('stopwords')
+stop = stopwords.words('english')
+
+rev = rev[['text', 'sentiment']]
+
+# Separating training and testing documents
+X_train, X_test, y_train, y_test = train_test_split(
+    rev.text, rev.sentiment, test_size=0.33, random_state=42)
+
+# TF-IDF features
+tfidf = TfidfVectorizer(strip_accents=None,
+                        lowercase=False,
+                        preprocessor=None)
+
+
+NB_tfidf = Pipeline([('vect', tfidf),
+                     ('clf', MultinomialNB())])
+
+
+
+NB_tfidf.fit(X_train, y_train)
+NB_tfidf.score(X_test, y_test)
+
+
+#Classification report
+preds = NB_tfidf.predict(X_test)
+print(classification_report(y_test, preds))
+print(confusion_matrix(y_test, preds))
+
+
+
